@@ -484,6 +484,28 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 	if (dev->msg_err)
 		intr_mask = 0;
 
+	/*
+	 * Size the RX FIFO threshold to the reads that have been queued, so the
+	 * controller raises one RX_FULL for the whole burst instead of one per
+	 * received byte. Once every message has been queued the threshold can be
+	 * the full outstanding count. Before that, cap it at half the FIFO so
+	 * RX_FULL and TX_EMPTY land in the same ISR entry rather than TX_EMPTY
+	 * re-firing against a full rx_outstanding.
+	 */
+	if (dev->rx_outstanding > 0) {
+		int rx_tl;
+
+		if (dev->msg_write_idx == dev->msgs_num)
+			rx_tl = dev->rx_outstanding;
+		else
+			rx_tl = min_t(int, dev->rx_outstanding,
+				      dev->rx_fifo_depth / 2);
+
+		regmap_write(dev->map, DW_IC_RX_TL, rx_tl ? rx_tl - 1 : 0);
+	} else {
+		regmap_write(dev->map, DW_IC_RX_TL, 0);
+	}
+
 	__i2c_dw_write_intr_mask(dev, intr_mask);
 }
 
